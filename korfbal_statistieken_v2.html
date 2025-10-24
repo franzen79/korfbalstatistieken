@@ -1,0 +1,272 @@
+
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Korfbal Statistieken</title>
+<style>
+  :root{
+    --header-bg: rgb(21,96,130);
+    --header-color: #fff;
+    --bg: #ffffff;
+    --btn-grey: rgb(217,217,217);
+    --btn-blue: rgb(70,177,225);
+    --result-grey: rgb(191,191,191);
+    --result-selected: rgb(21,96,130);
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:var(--font-family);-webkit-tap-highlight-color:transparent;}
+  header{
+    background:var(--header-bg);
+    color:var(--header-color);
+    padding:12px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  header h1{font-size:18px;margin:0;}
+  main{padding:10px; max-width:760px;margin:0 auto;}
+  .controls{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+  .grid{display:grid;grid-template-columns: 1fr; gap:8px;}
+  .row{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:6px;
+    border-radius:8px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.03);
+  }
+  .name-wrap{display:flex;flex-direction:column;align-items:flex-start;min-width:70px;}
+  .name-input{
+    width:62px;
+    height:34px;
+    padding:4px 6px;
+    font-size:14px;
+    border:1px solid #ccc;
+    border-radius:6px;
+  }
+  .counts{font-size:11px;color:#333;margin-top:4px;}
+  .types, .results{display:flex;gap:6px;flex-wrap:wrap;}
+  .btn{
+    min-width:34px;
+    height:34px;
+    padding:4px 8px;
+    border-radius:6px;
+    border:none;
+    background:var(--btn-grey);
+    font-size:13px;
+    cursor:pointer;
+    box-shadow:none;
+  }
+  .btn.small{min-width:28px;height:30px;font-size:12px;padding:4px;}
+  .btn.selected{background:var(--btn-blue);color:#fff;}
+  .btn.result{background:var(--result-grey);color:#000;}
+  .btn.result.selected{background:var(--result-selected);color:#fff;}
+  .footer{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;}
+  .download{padding:10px 14px;border-radius:8px;border:none;background:var(--header-bg);color:#fff;font-weight:600;}
+  .clear{padding:8px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;}
+  .small-note{font-size:12px;color:#666;}
+  @media (max-width:520px){
+    .row{gap:6px;padding:6px;}
+    .name-input{width:52px;height:32px;font-size:13px;}
+    .btn{min-width:30px;height:32px;font-size:12px;padding:4px 6px;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Korfbal Statistieken</h1>
+  <div class="small-note">Mobielvriendelijk · CSV export</div>
+</header>
+<main>
+  <div class="controls">
+    <div class="small-note">Vul namen in (max 4 tekens).</div>
+    <button id="reset-names" class="clear">Reset namen</button>
+  </div>
+
+  <div id="grid" class="grid" aria-live="polite"></div>
+
+  <div class="footer">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="download" class="download">Download CSV</button>
+      <button id="clear-log" class="clear">Wis alle registraties</button>
+    </div>
+    <div class="small-note">Registraties opgeslagen lokaal (localStorage).</div>
+  </div>
+</main>
+
+<script>
+(function(){
+  const PLAYER_COUNT = 14;
+  const EXTRA_OPP = 1; // tegenstander
+  const TOTAL_ROWS = PLAYER_COUNT + EXTRA_OPP;
+  const STORAGE_KEY = 'korfbal_stats_log_v1';
+  const NAMES_KEY = 'korfbal_stats_names_v1';
+
+  const defaultNames = Array.from({length:PLAYER_COUNT}, (_,i)=>'P'+String(i+1)).concat(['Tegen']);
+  let names = defaultNames.slice();
+  try {
+    const savedNames = JSON.parse(localStorage.getItem(NAMES_KEY));
+    if(savedNames && Array.isArray(savedNames) && savedNames.length === TOTAL_ROWS){
+      names = savedNames;
+    }
+  } catch(e){}
+
+  let log = [];
+  try {
+    const savedLog = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if(savedLog && Array.isArray(savedLog)) log = savedLog;
+  } catch(e){}
+
+  function saveLog(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(log)); }
+  function saveNames(){ localStorage.setItem(NAMES_KEY, JSON.stringify(names)); }
+
+  const grid = document.getElementById('grid');
+  const downloadBtn = document.getElementById('download');
+  const clearLogBtn = document.getElementById('clear-log');
+  const resetNamesBtn = document.getElementById('reset-names');
+
+  function buildGrid(){
+    grid.innerHTML = '';
+    for(let i=0;i<TOTAL_ROWS;i++){
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.index = i;
+
+      const nameWrap = document.createElement('div');
+      nameWrap.className = 'name-wrap';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'name-input';
+      nameInput.value = names[i]||'';
+      nameInput.maxLength = 4;
+      nameInput.addEventListener('input', (e)=>{
+        names[i] = e.target.value;
+        saveNames();
+        updateCountsForRow(i);
+      });
+      nameWrap.appendChild(nameInput);
+
+      const counts = document.createElement('div');
+      counts.className = 'counts';
+      counts.id = 'counts-'+i;
+      nameWrap.appendChild(counts);
+
+      row.appendChild(nameWrap);
+
+      const types = document.createElement('div');
+      types.className = 'types';
+      const typeButtons = [
+        {key:'afstand', label:'A'},
+        {key:'kort', label:'K'},
+        {key:'straf', label:'S'}
+      ];
+      typeButtons.forEach(tb=>{
+        const b = document.createElement('button');
+        b.className = 'btn small';
+        b.innerText = tb.label;
+        b.dataset.type = tb.key;
+        b.addEventListener('click',(e)=>{
+          const parent = e.target.parentElement;
+          Array.from(parent.querySelectorAll('.btn')).forEach(x=>x.classList.remove('selected'));
+          e.target.classList.add('selected');
+          const results = row.querySelectorAll('.btn.result');
+          results.forEach(r=>r.classList.remove('selected'));
+        });
+        types.appendChild(b);
+      });
+      row.appendChild(types);
+
+      const results = document.createElement('div');
+      results.className = 'results';
+      const mis = document.createElement('button');
+      mis.className = 'btn result small';
+      mis.innerText = 'MIS';
+      mis.dataset.result = 'MIS';
+      const raak = document.createElement('button');
+      raak.className = 'btn result small';
+      raak.innerText = 'RAAK';
+      raak.dataset.result = 'RAAK';
+
+      [mis,raak].forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          const selectedTypeBtn = row.querySelector('.types .btn.selected');
+          if(!selectedTypeBtn){
+            const tbtns = row.querySelectorAll('.types .btn');
+            tbtns.forEach(b=>{ b.style.boxShadow='0 0 0 2px rgba(70,177,225,0.35)'; setTimeout(()=>b.style.boxShadow='',300); });
+            return;
+          }
+          Array.from(results.querySelectorAll('.btn.result')).forEach(x=>x.classList.remove('selected'));
+          e.target.classList.add('selected');
+
+          const ts = new Date().toISOString();
+          const playerName = names[i] && names[i].trim() !== '' ? names[i].trim() : (i < PLAYER_COUNT ? ('P'+(i+1)) : 'Tegenstander');
+          const shotTypeMap = { 'afstand':'afstandsschot', 'kort':'korte kans', 'straf':'strafworp' };
+          const shotKey = selectedTypeBtn.dataset.type;
+          const shotType = shotTypeMap[shotKey] || shotKey;
+          const result = e.target.dataset.result;
+          const entry = { timestamp: ts, index:i, name: playerName, shot_type: shotType, result: result };
+          log.push(entry);
+          saveLog();
+          updateCountsForRow(i);
+          Array.from(row.querySelectorAll('.types .btn')).forEach(x=>x.classList.remove('selected'));
+          Array.from(row.querySelectorAll('.results .btn.result')).forEach(x=>x.classList.remove('selected'));
+          row.style.transition = 'background 0.2s';
+          row.style.background = 'rgba(70,177,225,0.12)';
+          setTimeout(()=> row.style.background = '#fff', 160);
+        });
+      });
+
+      results.appendChild(mis);
+      results.appendChild(raak);
+      row.appendChild(results);
+      grid.appendChild(row);
+      updateCountsForRow(i);
+    }
+  }
+
+  function updateCountsForRow(i){
+    const countsDiv = document.getElementById('counts-'+i);
+    const shots = log.filter(x=>x.index===i);
+    const total = shots.length;
+    const raak = shots.filter(x=>x.result==='RAAK').length;
+    countsDiv.innerText = `Shots: ${total} · R: ${raak}`;
+  }
+
+  downloadBtn.addEventListener('click', ()=>{
+    const header = ['timestamp','player_index','player_name','shot_type','result'];
+    const rows = log.map(e => [e.timestamp, e.index, `"${e.name.replace(/"/g,'""')}"`, `"${e.shot_type}"`, e.result]);
+    const csv = [header.join(','), ...rows.map(r=>r.join(','))].join('\\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date().toISOString().replace(/[:.]/g,'-');
+    a.download = `korfbal_statistieken_${now}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  clearLogBtn.addEventListener('click', ()=>{
+    if(!confirm('Weet je zeker dat je alle registraties wilt wissen?')) return;
+    log = [];
+    saveLog();
+    for(let i=0;i<TOTAL_ROWS;i++) updateCountsForRow(i);
+  });
+
+  resetNamesBtn.addEventListener('click', ()=>{
+    if(!confirm('Reset alle namen naar standaardwaarden?')) return;
+    names = defaultNames.slice();
+    saveNames();
+    buildGrid();
+  });
+
+  buildGrid();
+})();
+</script>
+</body>
+</html>
